@@ -1,0 +1,47 @@
+services:
+
+  mysql:
+    image: mysql:8.4
+    container_name: taskmanager-mysql
+
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: taskmanager
+      MYSQL_USER: taskuser
+      MYSQL_PASSWORD: taskpassword
+
+    ports:
+      - "3307:3306"
+
+    volumes:
+      - mysql_data:/var/lib/mysql
+
+
+  backend:
+    build:
+      context: ./taskmanager
+
+    container_name: taskmanager-backend
+
+    ports:
+      - "8080:8080"
+
+    depends_on:
+      - mysql
+
+
+  frontend:
+    build:
+      context: ./frontend
+
+    container_name: taskmanager-frontend
+
+    ports:
+      - "3000:80"
+
+    depends_on:
+      - backend
+
+
+volumes:
+  mysql_data:

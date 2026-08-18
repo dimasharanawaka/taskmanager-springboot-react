@@ -1,0 +1,25 @@
+# Java / Maven
+target/
+*.class
+
+# IntelliJ
+.idea/
+*.iml
+
+# VS Code
+.vscode/
+
+# Node
+node_modules/
+frontend/node_modules/
+
+# React build
+frontend/dist/
+
+# Environment files
+.env
+.env.*
+
+# OS files
+.DS_Store
+Thumbs.db
