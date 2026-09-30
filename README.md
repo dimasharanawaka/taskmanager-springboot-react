@@ -91,6 +91,26 @@ spring.datasource.password=root_password
 spring.datasource.driver-class-name=com.mysql.cj.jdbc.Driver
 ```
 
+### JWT configuration
+
+The backend requires `JWT_SECRET` at startup. It must be a Base64-encoded random key containing at least 32 bytes. Generate a development-only key in PowerShell with:
+
+```powershell
+$bytes = New-Object byte[] 32
+$rng = New-Object System.Security.Cryptography.RNGCryptoServiceProvider
+$rng.GetBytes($bytes)
+$rng.Dispose()
+$env:JWT_SECRET = [Convert]::ToBase64String($bytes)
+```
+
+Keep the secret outside source control. Production deployments should provide it through a secret manager or environment configuration.
+
+Because existing task rows were development-only data and have no owner, clear them before the first authenticated backend startup:
+
+```powershell
+docker exec taskmanager-mysql mysql -uroot -proot_password -D taskmanager -e "DELETE FROM tasks;"
+```
+
 ## Run the backend
 
 From the backend folder:
@@ -107,6 +127,16 @@ http://localhost:8080
 ```
 
 ## API endpoints
+
+Authentication endpoints:
+
+```http
+POST http://localhost:8080/api/auth/register
+POST http://localhost:8080/api/auth/login
+GET  http://localhost:8080/api/auth/me
+```
+
+Task endpoints require an `Authorization: Bearer <token>` header and return only the authenticated user's tasks.
 
 ### Get all tasks
 ```http

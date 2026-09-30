@@ -1,51 +1,56 @@
 package com.dimasha.taskmanager;
 
-import org.springframework.web.bind.annotation.*;
+import jakarta.validation.Valid;
+import org.springframework.http.HttpStatus;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.web.bind.annotation.DeleteMapping;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.ResponseStatus;
+import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
 
 @RestController
 @RequestMapping("/api/tasks")
-@CrossOrigin(origins = "http://localhost:5173")
 public class TaskController {
 
-    private final TaskRepository taskRepository;
+    private final TaskService taskService;
 
-    public TaskController(TaskRepository taskRepository) {
-        this.taskRepository = taskRepository;
+    public TaskController(TaskService taskService) {
+        this.taskService = taskService;
     }
 
-    // GET all tasks
     @GetMapping
-    public List<Task> getTasks() {
-        return taskRepository.findAll();
+    public List<TaskResponse> getTasks(@AuthenticationPrincipal UserPrincipal principal) {
+        return taskService.getTasks(principal);
     }
 
-    // CREATE a task
     @PostMapping
-    public Task createTask(@RequestBody Task task) {
-        return taskRepository.save(task);
+    @ResponseStatus(HttpStatus.CREATED)
+    public TaskResponse createTask(
+            @Valid @RequestBody TaskRequest request,
+            @AuthenticationPrincipal UserPrincipal principal) {
+        return taskService.createTask(request, principal);
     }
 
-    // UPDATE a task
     @PutMapping("/{id}")
-    public Task updateTask(
+    public TaskResponse updateTask(
             @PathVariable Long id,
-            @RequestBody Task updatedTask) {
-
-        Task task = taskRepository.findById(id)
-                .orElseThrow(() -> new RuntimeException("Task not found"));
-
-        task.setTitle(updatedTask.getTitle());
-        task.setDescription(updatedTask.getDescription());
-        task.setCompleted(updatedTask.isCompleted());
-
-        return taskRepository.save(task);
+            @Valid @RequestBody TaskRequest request,
+            @AuthenticationPrincipal UserPrincipal principal) {
+        return taskService.updateTask(id, request, principal);
     }
 
-    // DELETE a task
     @DeleteMapping("/{id}")
-    public void deleteTask(@PathVariable Long id) {
-        taskRepository.deleteById(id);
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void deleteTask(
+            @PathVariable Long id,
+            @AuthenticationPrincipal UserPrincipal principal) {
+        taskService.deleteTask(id, principal);
     }
 }

@@ -11,7 +11,9 @@ import org.springframework.test.context.TestPropertySource;
 		"spring.datasource.username=sa",
 		"spring.datasource.password=",
 		"spring.jpa.hibernate.ddl-auto=create-drop",
-		"spring.jpa.database-platform=org.hibernate.dialect.H2Dialect"
+		"spring.jpa.database-platform=org.hibernate.dialect.H2Dialect",
+		"app.jwt.secret=VGhpc0lzQVN1ZmZpY2llbnRseUxvbmdEZXZlbG9wbWVudEtleUZvclRlc3Rz",
+		"app.jwt.expiration=86400000"
 })
 class TaskmanagerApplicationTests {
 
