@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useState } from "react";
+﻿import { useEffect, useMemo, useState } from "react";
 import "./App.css";
 import { ApiError, authApi, clearToken, getToken, setToken, tasksApi } from "./api/api";
 
-const emptyForm = { title: "", description: "" };
+const emptyForm = { title: "", description: "", priority: "MEDIUM", status: "TODO", dueDate: "" };
 
 function App() {
   const [authStatus, setAuthStatus] = useState(() => (getToken() ? "loading" : "unauthenticated"));
@@ -101,7 +101,13 @@ function App() {
 
   const openEditForm = (task) => {
     setFormMode({ type: "edit", taskId: task.id });
-    setFormValues({ title: task.title || "", description: task.description || "" });
+    setFormValues({
+      title: task.title || "",
+      description: task.description || "",
+      priority: task.priority || "MEDIUM",
+      status: getTaskStatus(task),
+      dueDate: task.dueDate || "",
+    });
     setFormError("");
     setFeedback("");
   };
@@ -120,7 +126,7 @@ function App() {
   const saveTask = async (event) => {
     event.preventDefault();
     if (!formValues.title.trim()) {
-      setFormError("Add a title before saving this task.");
+      setFormError("Please enter a task title.");
       return;
     }
 
@@ -128,26 +134,32 @@ function App() {
       setError("");
       setFormError("");
       setIsSaving(true);
-      const isEditing = formMode.type === "edit";
-      const existingTask = isEditing
-        ? tasks.find((task) => task.id === formMode.taskId)
-        : null;
       const payload = {
         title: formValues.title.trim(),
         description: formValues.description.trim(),
-        completed: existingTask?.completed || false,
+        priority: formValues.priority || "MEDIUM",
+        status: formValues.status || "TODO",
+        dueDate: formValues.dueDate || null,
+        completed: (formValues.status || "TODO") === "COMPLETED",
       };
-      if (isEditing) {
+
+      if (formMode.type === "edit") {
         await tasksApi.update(formMode.taskId, payload);
       } else {
         await tasksApi.create(payload);
       }
+
       await fetchTasks();
       closeForm();
-      setFeedback(isEditing ? "Task updated successfully." : "Task created successfully.");
+      setFeedback(formMode.type === "edit" ? "Task updated successfully." : "Task created successfully.");
     } catch (error) {
       console.error("Error saving task:", error);
-      setFormError("Could not save this task. Please try again.");
+      if (error instanceof ApiError && error.fields) {
+        const fieldMessage = Object.values(error.fields)[0];
+        setFormError(fieldMessage || error.message || "Could not save this task. Please try again.");
+        return;
+      }
+      setFormError(error.message || "Could not save this task. Please try again.");
     } finally {
       setIsSaving(false);
     }
@@ -156,10 +168,14 @@ function App() {
   const toggleCompleted = async (task) => {
     try {
       setError("");
+      const nextStatus = getTaskStatus(task) === "COMPLETED" ? "TODO" : "COMPLETED";
       const updatedTask = await tasksApi.update(task.id, {
         title: task.title,
         description: task.description,
-        completed: !task.completed,
+        priority: getTaskPriority(task),
+        status: nextStatus,
+        dueDate: task.dueDate || null,
+        completed: nextStatus === "COMPLETED",
       });
       setTasks((current) => current.map((item) => (item.id === task.id ? updatedTask : item)));
     } catch (error) {
@@ -194,8 +210,9 @@ function App() {
 
   const stats = useMemo(() => ({
     total: tasks.length,
-    completed: tasks.filter((task) => task.completed).length,
-    pending: tasks.filter((task) => !task.completed).length,
+    completed: tasks.filter((task) => getTaskStatus(task) === "COMPLETED").length,
+    inProgress: tasks.filter((task) => getTaskStatus(task) === "IN_PROGRESS").length,
+    overdue: tasks.filter((task) => getTaskDueState(task) === "overdue").length,
   }), [tasks]);
 
   const openTasks = () => setActiveView("tasks");
@@ -275,6 +292,8 @@ function App() {
 
 function Dashboard({ stats, tasks, isLoading, onViewTasks }) {
   const recentTasks = tasks.slice(0, 4);
+  const todayTasks = tasks.filter((task) => getTaskDueState(task) === "today").slice(0, 4);
+  const upcomingTasks = tasks.filter((task) => getTaskDueState(task) === "upcoming").slice(0, 4);
 
   return (
     <div className="view dashboard-view">
@@ -285,51 +304,82 @@ function Dashboard({ stats, tasks, isLoading, onViewTasks }) {
       <div className="stat-grid">
         <StatCard label="Total tasks" value={stats.total} tone="primary" />
         <StatCard label="Completed" value={stats.completed} tone="success" />
-        <StatCard label="Pending" value={stats.pending} tone="warning" />
+        <StatCard label="In progress" value={stats.inProgress} tone="warning" />
+        <StatCard label="Overdue" value={stats.overdue} tone="danger" />
       </div>
       <section className="overview-section">
-        <div className="section-heading"><div><h2>Task overview</h2><p>Your latest work at a glance.</p></div><button className="text-button" onClick={onViewTasks}>Manage tasks <span aria-hidden="true">→</span></button></div>
+        <div className="section-heading"><div><h2>Priority at a glance</h2><p>Keep delivery moving with the work that matters most.</p></div><button className="text-button" onClick={onViewTasks}>Manage tasks <span aria-hidden="true">→</span></button></div>
         {isLoading ? <LoadingState /> : recentTasks.length === 0 ? <EmptyState /> : <div className="overview-list">{recentTasks.map((task) => <TaskRow key={task.id} task={task} />)}</div>}
+      </section>
+      <section className="mini-panels">
+        <div className="mini-panel">
+          <div className="mini-panel-header"><h3>Today&apos;s tasks</h3></div>
+          {todayTasks.length === 0 ? <p className="mini-empty">No tasks are due today.</p> : <ul className="mini-task-list">{todayTasks.map((task) => <li key={task.id} className="mini-task-item"><span>{task.title}</span><small>{getTaskPriority(task)}</small></li>)}</ul>}
+        </div>
+        <div className="mini-panel">
+          <div className="mini-panel-header"><h3>Upcoming</h3></div>
+          {upcomingTasks.length === 0 ? <p className="mini-empty">No upcoming tasks.</p> : <ul className="mini-task-list">{upcomingTasks.map((task) => <li key={task.id} className="mini-task-item"><span>{task.title}</span><small>{formatDueLabel(task)}</small></li>)}</ul>}
+        </div>
       </section>
     </div>
   );
 }
 
 function StatCard({ label, value, tone }) {
-  return <div className={`stat-card ${tone}`}><span className="stat-icon" aria-hidden="true">{tone === "success" ? "✓" : tone === "warning" ? "○" : "#"}</span><div><p>{label}</p><strong>{value}</strong></div></div>;
+  return <div className={`stat-card ${tone}`}><span className="stat-icon" aria-hidden="true">{tone === "success" ? "✓" : tone === "warning" ? "○" : tone === "danger" ? "!" : "#"}</span><div><p>{label}</p><strong>{value}</strong></div></div>;
 }
 
 function TasksView({ tasks, isLoading, onAdd, onEdit, onDelete, onToggle }) {
   const [search, setSearch] = useState("");
-  const [filter, setFilter] = useState("all");
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [priorityFilter, setPriorityFilter] = useState("all");
+  const [dueFilter, setDueFilter] = useState("all");
+  const [sortBy, setSortBy] = useState("due_asc");
   const normalizedSearch = search.trim().toLowerCase();
+
   const filteredTasks = tasks.filter((task) => {
-    const matchesFilter = filter === "all" || (filter === "completed" ? task.completed : !task.completed);
     const matchesSearch = !normalizedSearch || `${task.title} ${task.description}`.toLowerCase().includes(normalizedSearch);
-    return matchesFilter && matchesSearch;
+    const matchesStatus = statusFilter === "all" || getTaskStatus(task) === statusFilter;
+    const matchesPriority = priorityFilter === "all" || getTaskPriority(task) === priorityFilter;
+    const matchesDue = getDueMatches(task, dueFilter);
+    return matchesSearch && matchesStatus && matchesPriority && matchesDue;
   });
+
+  const sortedTasks = [...filteredTasks].sort((left, right) => sortTasks(left, right, sortBy));
 
   return (
     <div className="view tasks-view">
       <div className="page-heading"><div><p className="eyebrow">Workspace</p><h1>Tasks</h1><p className="page-description">Capture, organize, and complete your work.</p></div><button className="button primary" onClick={onAdd}><span aria-hidden="true">+</span> Add task</button></div>
       <section className="task-panel">
-        <div className="task-toolbar"><label className="search-field"><span aria-hidden="true">⌕</span><span className="sr-only">Search tasks</span><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search tasks..." /></label><div className="filter-tabs" role="group" aria-label="Filter tasks">{[["all", "All"], ["pending", "Pending"], ["completed", "Completed"]].map(([value, label]) => <button key={value} className={filter === value ? "filter-tab active" : "filter-tab"} onClick={() => setFilter(value)}>{label}</button>)}</div></div>
-        {isLoading ? <LoadingState /> : tasks.length === 0 ? <EmptyState onAdd={onAdd} /> : filteredTasks.length === 0 ? <NoResultsState /> : <div className="task-list">{filteredTasks.map((task) => <TaskCard key={task.id} task={task} onEdit={onEdit} onDelete={onDelete} onToggle={onToggle} />)}</div>}
+        <div className="task-toolbar">
+          <label className="search-field"><span aria-hidden="true">⌕</span><span className="sr-only">Search tasks</span><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search tasks..." /></label>
+          <div className="toolbar-controls">
+            <label className="field-inline"><span>Status</span><select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}><option value="all">All</option>{STATUS_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>
+            <label className="field-inline"><span>Priority</span><select value={priorityFilter} onChange={(event) => setPriorityFilter(event.target.value)}><option value="all">All</option>{PRIORITY_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>
+            <label className="field-inline"><span>Due</span><select value={dueFilter} onChange={(event) => setDueFilter(event.target.value)}>{DUE_FILTERS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>
+            <label className="field-inline"><span>Sort</span><select value={sortBy} onChange={(event) => setSortBy(event.target.value)}>{SORT_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>
+          </div>
+        </div>
+        {isLoading ? <LoadingState /> : tasks.length === 0 ? <EmptyState onAdd={onAdd} /> : sortedTasks.length === 0 ? <NoResultsState /> : <div className="task-list">{sortedTasks.map((task) => <TaskCard key={task.id} task={task} onEdit={onEdit} onDelete={onDelete} onToggle={onToggle} />)}</div>}
       </section>
     </div>
   );
 }
 
 function TaskRow({ task }) {
-  return <div className="task-row"><span className={`status-dot ${task.completed ? "complete" : "pending"}`} aria-hidden="true" /><div><strong className={task.completed ? "completed-text" : ""}>{task.title}</strong><p>{task.description || "No description"}</p></div><span className={`status-badge ${task.completed ? "completed" : "pending"}`}>{task.completed ? "Completed" : "Pending"}</span></div>;
+  const status = getTaskStatus(task);
+  const dueState = getTaskDueState(task);
+  return <div className="task-row"><span className={`status-dot ${status === "COMPLETED" ? "complete" : "pending"}`} aria-hidden="true" /><div><strong className={status === "COMPLETED" ? "completed-text" : ""}>{task.title}</strong><p>{task.description || "No description"}</p></div><div className="task-row-meta"><span className={`status-badge ${getStatusBadgeClass(status)}`}>{getTaskStatusLabel(status)}</span>{task.dueDate && <span className={`due-badge ${getDueBadgeClass(dueState)}`}>{formatDueLabel(task)}</span>}</div></div>;
 }
 
 function TaskCard({ task, onEdit, onDelete, onToggle }) {
-  return <article className={`task-card ${task.completed ? "is-complete" : ""}`}><div className="task-card-main"><button className={`check-button ${task.completed ? "checked" : ""}`} onClick={() => onToggle(task)} aria-label={task.completed ? `Mark ${task.title} as pending` : `Mark ${task.title} as completed`}>{task.completed ? "✓" : ""}</button><div className="task-card-copy"><div className="task-title-line"><h2>{task.title}</h2><span className={`status-badge ${task.completed ? "completed" : "pending"}`}>{task.completed ? "Completed" : "Pending"}</span></div><p>{task.description || "No description"}</p></div></div><div className="task-actions"><button className="button secondary" onClick={() => onEdit(task)}>Edit</button><button className="button danger-ghost" onClick={() => onDelete(task)}>Delete</button></div></article>;
+  const status = getTaskStatus(task);
+  const dueState = getTaskDueState(task);
+  return <article className={`task-card ${status === "COMPLETED" ? "is-complete" : ""}`}><div className="task-card-main"><button className={`check-button ${status === "COMPLETED" ? "checked" : ""}`} onClick={() => onToggle(task)} aria-label={status === "COMPLETED" ? `Mark ${task.title} as pending` : `Mark ${task.title} as completed`}>{status === "COMPLETED" ? "✓" : ""}</button><div className="task-card-copy"><div className="task-title-line"><h2>{task.title}</h2><span className={`status-badge ${getStatusBadgeClass(status)}`}>{getTaskStatusLabel(status)}</span></div><p>{task.description || "No description"}</p><div className="task-meta"><span className={`priority-badge ${getPriorityBadgeClass(getTaskPriority(task))}`}>{getTaskPriorityLabel(getTaskPriority(task))}</span>{task.dueDate ? <span className={`due-badge ${getDueBadgeClass(dueState)}`}>{formatDueLabel(task)}</span> : <span className="due-badge none">No due date</span>}</div></div></div><div className="task-actions"><button className="button secondary" onClick={() => onEdit(task)}>Edit</button><button className="button danger-ghost" onClick={() => onDelete(task)}>Delete</button></div></article>;
 }
 
 function TaskForm({ mode, values, error, isSaving, onChange, onSubmit, onCancel }) {
-  return <div className="modal-backdrop"><section className="modal task-form-modal" role="dialog" aria-modal="true" aria-labelledby="task-form-title"><div className="modal-header"><div><p className="eyebrow">{mode === "edit" ? "Update task" : "New task"}</p><h2 id="task-form-title">{mode === "edit" ? "Edit task" : "Add a task"}</h2></div><button className="icon-button" onClick={onCancel} aria-label="Close form">×</button></div><form onSubmit={onSubmit}><div className="form-field"><label htmlFor="task-title">Title</label><input id="task-title" name="title" value={values.title} onChange={onChange} placeholder="What needs to be done?" autoFocus /></div><div className="form-field"><label htmlFor="task-description">Description <span>(optional)</span></label><textarea id="task-description" name="description" value={values.description} onChange={onChange} placeholder="Add a little context..." rows="5" /></div>{error && <p className="form-error" role="alert">{error}</p>}<div className="modal-actions"><button type="button" className="button secondary" onClick={onCancel}>Cancel</button><button type="submit" className="button primary" disabled={isSaving}>{isSaving ? "Saving..." : "Save task"}</button></div></form></section></div>;
+  return <div className="modal-backdrop"><section className="modal task-form-modal" role="dialog" aria-modal="true" aria-labelledby="task-form-title"><div className="modal-header"><div><p className="eyebrow">{mode === "edit" ? "Update task" : "New task"}</p><h2 id="task-form-title">{mode === "edit" ? "Edit task" : "Add a task"}</h2></div><button className="icon-button" onClick={onCancel} aria-label="Close form">×</button></div><form onSubmit={onSubmit}><div className="form-field"><label htmlFor="task-title">Title</label><input id="task-title" name="title" value={values.title} onChange={onChange} placeholder="What needs to be done?" autoFocus /></div><div className="form-field"><label htmlFor="task-description">Description <span>(optional)</span></label><textarea id="task-description" name="description" value={values.description} onChange={onChange} placeholder="Add a little context..." rows="5" /></div><div className="form-row two-col"><div className="form-field"><label htmlFor="task-priority">Priority</label><select id="task-priority" name="priority" value={values.priority || "MEDIUM"} onChange={onChange}>{PRIORITY_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></div><div className="form-field"><label htmlFor="task-status">Status</label><select id="task-status" name="status" value={values.status || "TODO"} onChange={onChange}>{STATUS_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></div></div><div className="form-field"><label htmlFor="task-due-date">Due date <span>(optional)</span></label><input id="task-due-date" name="dueDate" type="date" value={values.dueDate || ""} onChange={onChange} /></div>{error && <p className="form-error" role="alert">{error}</p>}<div className="modal-actions"><button type="button" className="button secondary" onClick={onCancel}>Cancel</button><button type="submit" className="button primary" disabled={isSaving}>{isSaving ? "Saving..." : "Save task"}</button></div></form></section></div>;
 }
 
 function DeleteConfirmation({ task, isDeleting, onCancel, onConfirm }) {
@@ -380,7 +430,172 @@ function AuthScreen({ mode, onModeChange, onAuthenticated }) {
     }
   };
 
-  return <main className="auth-page"><section className="auth-card"><div className="auth-brand"><div className="brand-mark"><span>TF</span><strong>TaskFlow</strong></div><p>{isRegistering ? "Create your personal productivity space." : "A calmer way to manage your work."}</p></div><div className="auth-heading"><p className="eyebrow">{isRegistering ? "Get started" : "Welcome back"}</p><h1>{isRegistering ? "Create your account" : "Sign in to TaskFlow"}</h1><p>{isRegistering ? "Start organizing your tasks today." : "Continue where you left off."}</p></div><form className="auth-form" onSubmit={submit}>{isRegistering && <div className="form-field"><label htmlFor="auth-name">Name</label><input id="auth-name" name="name" value={values.name} onChange={handleChange} placeholder="Your name" autoComplete="name" required /></div>}<div className="form-field"><label htmlFor="auth-email">Email</label><input id="auth-email" name="email" type="email" value={values.email} onChange={handleChange} placeholder="you@example.com" autoComplete="email" required /></div><div className="form-field"><label htmlFor="auth-password">Password</label><input id="auth-password" name="password" type="password" value={values.password} onChange={handleChange} placeholder="At least 8 characters" autoComplete={isRegistering ? "new-password" : "current-password"} minLength="8" required /></div>{isRegistering && <div className="form-field"><label htmlFor="auth-confirm-password">Confirm password</label><input id="auth-confirm-password" name="confirmPassword" type="password" value={values.confirmPassword} onChange={handleChange} placeholder="Repeat your password" autoComplete="new-password" required /></div>}{error && <p className="form-error" role="alert">{error}</p>}<button className="button primary auth-submit" type="submit" disabled={isSubmitting}>{isSubmitting ? "Please wait..." : isRegistering ? "Create account" : "Sign in"}</button></form><p className="auth-switch">{isRegistering ? "Already have an account?" : "New to TaskFlow?"} <button onClick={() => { setError(""); onModeChange(isRegistering ? "login" : "register"); }}>{isRegistering ? "Sign in" : "Create an account"}</button></p></section></main>;
+  return <main className="auth-page"><section className="auth-card"><div className="auth-brand"><div className="brand-mark"><span>TF</span><strong>TaskFlow</strong></div><p>{isRegistering ? "Create your personal productivity space." : "A calmer way to manage your work."}</p></div><div className="auth-heading"><p className="eyebrow">{isRegistering ? "Get started" : "Welcome back"}</p><h1>{isRegistering ? "Create your account" : "Sign in to TaskFlow"}</h1><p>{isRegistering ? "Start organizing your tasks today." : "Continue where you left off."}</p></div><form className="auth-form" onSubmit={submit}>{isRegistering && <div className="form-field"><label htmlFor="auth-name">Name</label><input id="auth-name" name="name" value={values.name} onChange={handleChange} placeholder="Your name" autoComplete="name" required /></div>}<div className="form-field"><label htmlFor="auth-email">Email</label><input id="auth-email" name="email" type="email" value={values.email} onChange={handleChange} placeholder="you@example.com" autoComplete="email" required /></div><div className="form-field"><label htmlFor="auth-password">Password</label><input id="auth-password" name="password" type="password" value={values.password} onChange={handleChange} placeholder="At least 8 characters" autoComplete={isRegistering ? "new-password" : "current-password"} minLength="8" required /></div>{isRegistering && <div className="form-field"><label htmlFor="auth-confirm-password">Confirm password</label><input id="auth-confirm-password" name="confirmPassword" type="password" value={values.confirmPassword} onChange={handleChange} placeholder="Repeat your password" autoComplete="new-password" required /></div>}{error && <p className="form-error" role="alert">{error}</p>}<button className="button primary auth-submit" type="submit" disabled={isSubmitting}>{isSubmitting ? "Please wait..." : isRegistering ? "Create account" : "Sign in"}</button></form><p className="auth-switch">{isRegistering ? "Already have an account?" : "Need an account?"} <button type="button" onClick={() => onModeChange(isRegistering ? "login" : "register")}>{isRegistering ? "Sign in" : "Create one"}</button></p></section></main>;
+}
+
+const PRIORITY_OPTIONS = [
+  { value: "LOW", label: "Low" },
+  { value: "MEDIUM", label: "Medium" },
+  { value: "HIGH", label: "High" },
+];
+
+const STATUS_OPTIONS = [
+  { value: "TODO", label: "Todo" },
+  { value: "IN_PROGRESS", label: "In Progress" },
+  { value: "COMPLETED", label: "Completed" },
+];
+
+const DUE_FILTERS = [
+  { value: "all", label: "All" },
+  { value: "overdue", label: "Overdue" },
+  { value: "today", label: "Today" },
+  { value: "upcoming", label: "Upcoming" },
+  { value: "no_due_date", label: "No due date" },
+];
+
+const SORT_OPTIONS = [
+  { value: "due_asc", label: "Due date: earliest first" },
+  { value: "due_desc", label: "Due date: latest first" },
+  { value: "priority_desc", label: "Priority: high to low" },
+  { value: "title_asc", label: "Title: A to Z" },
+];
+
+function getTaskPriority(task) {
+  return task?.priority || "MEDIUM";
+}
+
+function getTaskPriorityLabel(priority) {
+  return PRIORITY_OPTIONS.find((option) => option.value === priority)?.label || "Medium";
+}
+
+function getTaskStatus(task) {
+  return task?.status || (task?.completed ? "COMPLETED" : "TODO");
+}
+
+function getTaskStatusLabel(status) {
+  return STATUS_OPTIONS.find((option) => option.value === status)?.label || "Todo";
+}
+
+function getStatusBadgeClass(status) {
+  if (status === "COMPLETED") return "completed";
+  if (status === "IN_PROGRESS") return "in-progress";
+  return "todo";
+}
+
+function getPriorityBadgeClass(priority) {
+  return (priority || "MEDIUM").toLowerCase();
+}
+
+function parseLocalDate(dateString) {
+  if (!dateString) {
+    return null;
+  }
+
+  const [year, month, day] = dateString.split("-").map(Number);
+  if (!year || !month || !day) {
+    return null;
+  }
+
+  return new Date(year, month - 1, day);
+}
+
+function getTaskDueState(task) {
+  if (!task?.dueDate) {
+    return "no_due_date";
+  }
+
+  if (getTaskStatus(task) === "COMPLETED") {
+    return "completed";
+  }
+
+  const dueDate = parseLocalDate(task.dueDate);
+  if (!dueDate) {
+    return "no_due_date";
+  }
+
+  const today = new Date();
+  const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  const dueStart = new Date(dueDate.getFullYear(), dueDate.getMonth(), dueDate.getDate());
+
+  if (dueStart < todayStart) {
+    return "overdue";
+  }
+
+  if (dueStart.getTime() === todayStart.getTime()) {
+    return "today";
+  }
+
+  return "upcoming";
+}
+
+function formatDueLabel(task) {
+  if (!task?.dueDate) {
+    return "No due date";
+  }
+
+  const dueState = getTaskDueState(task);
+  const dueDate = parseLocalDate(task.dueDate);
+  if (!dueDate) {
+    return "No due date";
+  }
+
+  const dateLabel = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric" }).format(dueDate);
+
+  if (dueState === "completed") {
+    return `Completed • ${dateLabel}`;
+  }
+
+  if (dueState === "overdue") {
+    return `Overdue • ${dateLabel}`;
+  }
+
+  if (dueState === "today") {
+    return "Due today";
+  }
+
+  const today = new Date();
+  const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  const diffDays = Math.round((dueDate.getTime() - todayStart.getTime()) / 86400000);
+
+  if (diffDays === 1) {
+    return "Due tomorrow";
+  }
+
+  return `Due ${dateLabel}`;
+}
+
+function getDueMatches(task, dueFilter) {
+  if (dueFilter === "all") {
+    return true;
+  }
+
+  return getTaskDueState(task) === dueFilter;
+}
+
+function sortTasks(left, right, sortBy) {
+  const leftDue = left.dueDate ? parseLocalDate(left.dueDate)?.getTime() ?? Number.MAX_SAFE_INTEGER : Number.MAX_SAFE_INTEGER;
+  const rightDue = right.dueDate ? parseLocalDate(right.dueDate)?.getTime() ?? Number.MAX_SAFE_INTEGER : Number.MAX_SAFE_INTEGER;
+  const priorityWeight = { LOW: 1, MEDIUM: 2, HIGH: 3 };
+
+  switch (sortBy) {
+    case "due_desc":
+      return rightDue - leftDue;
+    case "priority_desc":
+      return (priorityWeight[right.priority || "MEDIUM"] || 0) - (priorityWeight[left.priority || "MEDIUM"] || 0);
+    case "title_asc":
+      return (left.title || "").localeCompare(right.title || "");
+    case "due_asc":
+    default:
+      return leftDue - rightDue;
+  }
+}
+
+function getDueBadgeClass(dueState) {
+  if (dueState === "overdue") return "overdue";
+  if (dueState === "today") return "today";
+  if (dueState === "upcoming") return "upcoming";
+  if (dueState === "completed") return "completed";
+  return "none";
 }
 
 export default App;

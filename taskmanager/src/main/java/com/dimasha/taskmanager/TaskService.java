@@ -23,7 +23,9 @@ public class TaskService {
         Task task = new Task();
         task.setTitle(request.title().trim());
         task.setDescription(normalizeDescription(request.description()));
-        task.setCompleted(request.completed());
+        task.setPriority(request.priorityOrDefault());
+        task.setStatus(request.statusOrDefault());
+        task.setDueDate(request.dueDate());
         task.setUser(principal.getUser());
         return TaskResponse.from(taskRepository.save(task));
     }
@@ -32,7 +34,9 @@ public class TaskService {
         Task task = findOwnedTask(id, principal);
         task.setTitle(request.title().trim());
         task.setDescription(normalizeDescription(request.description()));
-        task.setCompleted(request.completed());
+        task.setPriority(request.priorityOrDefault());
+        task.setStatus(request.statusOrDefault());
+        task.setDueDate(request.dueDate());
         return TaskResponse.from(taskRepository.save(task));
     }
 

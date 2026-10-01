@@ -1,18 +1,20 @@
-# Task Manager
+# TaskFlow
 
-A full-stack task manager built with Spring Boot, React, MySQL, Docker Compose, and a REST API.
+TaskFlow is a full-stack personal productivity task manager built with Spring Boot, React, MySQL, and Docker Compose. It supports authenticated, user-owned tasks with priority, status, due dates, filtering, sorting, and dashboard statistics.
 
 ## Features
 
-- Create tasks
-- View all tasks
-- Update task details
-- Delete tasks
-- Mark tasks as completed
-- Java + Spring Boot backend
-- React frontend
-- MySQL persistence
-- Dockerized database setup
+- JWT registration, login, session restore, and logout
+- Create, edit, complete, and delete tasks
+- Priority levels: `LOW`, `MEDIUM`, `HIGH`
+- Status values: `TODO`, `IN_PROGRESS`, `COMPLETED`
+- Optional due dates with overdue, today, upcoming, and no-date states
+- Search by task title or description
+- Filter by status, priority, or due-date state
+- Sort by due date, priority, or title
+- Dashboard counts for total, completed, in-progress, and overdue tasks
+- User ownership enforced from the authenticated principal
+- Friendly validation errors for invalid task data
 
 ## Tech Stack
 
@@ -32,10 +34,17 @@ A full-stack task manager built with Spring Boot, React, MySQL, Docker Compose, 
 
 ### Database
 - MySQL 8.4
+- H2 in-memory database for backend tests
 
 ### DevOps
 - Docker Desktop
 - Docker Compose
+
+## Task model
+
+Each task has a title, optional description, priority, status, and optional due date. The `status` field is the source of truth for completion. The legacy `completed` field is still accepted for compatibility with older clients, but new clients should use `status`.
+
+The backend never accepts a user ID from the frontend to determine ownership. The authenticated JWT principal controls which tasks can be listed, edited, or deleted.
 
 ## Project Structure
 
@@ -79,6 +88,8 @@ The database is configured as:
 - Database: `taskmanager`
 - Username: `root`
 - Password: `root_password`
+
+Docker Compose also creates a `taskmanager` user with password `taskmanager_password`, but the checked-in `application.properties` currently connects as `root`.
 
 ## Backend configuration
 
@@ -152,11 +163,15 @@ Example body:
 
 ```json
 {
-  "title": "Learn Spring Boot",
-  "description": "Build Task Manager API",
-  "completed": false
+  "title": "Prepare project demo",
+  "description": "Show the dashboard and task filters",
+  "priority": "HIGH",
+  "status": "IN_PROGRESS",
+  "dueDate": "2026-10-15"
 }
 ```
+
+`dueDate` is optional and uses `YYYY-MM-DD`. `priority` defaults to `MEDIUM` and `status` defaults to `TODO` when omitted.
 
 ### Update task
 ```http
@@ -184,6 +199,26 @@ The frontend typically runs on:
 http://localhost:5173
 ```
 
+## Validate and package
+
+Run the frontend checks:
+
+```powershell
+cd D:\GitHub_Projects\taskmanager\frontend
+npm run lint
+npm run build
+```
+
+Run backend tests and create the production JAR:
+
+```powershell
+cd D:\GitHub_Projects\taskmanager\taskmanager
+.\mvnw.cmd test
+.\mvnw.cmd package -DskipTests
+```
+
+The packaged backend is written to `taskmanager/target/taskmanager-0.0.1-SNAPSHOT.jar`.
+
 ## Verify the app
 
 ### Check Docker
@@ -210,6 +245,7 @@ docker exec taskmanager-mysql mysql -uroot -proot_password -D taskmanager -e "SH
 - Do not change the port mapping from `3307:3306` unless the port is free and you also update the app config.
 - The project is already set up to work with the existing package layout under `com.dimasha.taskmanager`.
 - The backend expects Docker Desktop and the MySQL container to be running before the Spring Boot app starts.
+- Do not commit database passwords or JWT secrets.
 
 ## Common issue
 
@@ -219,5 +255,6 @@ If the backend fails with a database connection error, check:
 2. `docker ps` shows the MySQL container
 3. The MySQL port is `3307`
 4. The app is configured to `localhost:3307`
+5. `JWT_SECRET` is set in the same terminal used to start Spring Boot
 
 Once those are correct, the project runs normally.

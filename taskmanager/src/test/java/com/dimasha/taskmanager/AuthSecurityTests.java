@@ -101,6 +101,44 @@ class AuthSecurityTests {
     }
 
     @Test
+    void tasksSupportPriorityStatusAndDueDateWithDefaults() throws Exception {
+        String token = register("task-fields@example.com", "secure-password");
+
+        String createdTask = mockMvc.perform(post("/api/tasks")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"title\":\"Design review\",\"description\":\"Prepare sprint notes\"}"))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.priority").value("MEDIUM"))
+                .andExpect(jsonPath("$.status").value("TODO"))
+                .andExpect(jsonPath("$.dueDate").doesNotExist())
+                .andExpect(jsonPath("$.completed").value(false))
+                .andReturn().getResponse().getContentAsString();
+
+        long taskId = objectMapper.readTree(createdTask).get("id").asLong();
+
+        mockMvc.perform(put("/api/tasks/" + taskId)
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"title\":\"Design review\",\"description\":\"Ready for handoff\",\"priority\":\"HIGH\",\"status\":\"IN_PROGRESS\",\"dueDate\":\"2026-10-10\",\"completed\":false}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.priority").value("HIGH"))
+                .andExpect(jsonPath("$.status").value("IN_PROGRESS"))
+                .andExpect(jsonPath("$.dueDate").value("2026-10-10"))
+                .andExpect(jsonPath("$.completed").value(false));
+
+        mockMvc.perform(put("/api/tasks/" + taskId)
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"title\":\"Design review\",\"description\":\"Ready for handoff\",\"priority\":\"LOW\",\"status\":\"COMPLETED\",\"dueDate\":\"2026-10-12\",\"completed\":true}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.priority").value("LOW"))
+                .andExpect(jsonPath("$.status").value("COMPLETED"))
+                .andExpect(jsonPath("$.dueDate").value("2026-10-12"))
+                .andExpect(jsonPath("$.completed").value(true));
+    }
+
+    @Test
     void usersCanOnlyReadAndModifyTheirOwnTasks() throws Exception {
         String userAToken = register("user-a@example.com", "secure-password");
         String userBToken = register("user-b@example.com", "secure-password");
@@ -108,7 +146,7 @@ class AuthSecurityTests {
         String createdTask = mockMvc.perform(post("/api/tasks")
                         .header("Authorization", "Bearer " + userAToken)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"title\":\"User A task\",\"description\":\"Private\",\"completed\":false}"))
+                        .content("{\"title\":\"User A task\",\"description\":\"Private\",\"priority\":\"HIGH\",\"status\":\"TODO\",\"dueDate\":\"2026-10-10\",\"completed\":false}"))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.title").value("User A task"))
                 .andReturn().getResponse().getContentAsString();
@@ -123,7 +161,7 @@ class AuthSecurityTests {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$", hasSize(0)));
 
-        String update = "{\"title\":\"Hijacked\",\"description\":\"No access\",\"completed\":true}";
+        String update = "{\"title\":\"Hijacked\",\"description\":\"No access\",\"priority\":\"LOW\",\"status\":\"COMPLETED\",\"dueDate\":\"2026-10-20\",\"completed\":true}";
         mockMvc.perform(put("/api/tasks/" + taskId)
                         .header("Authorization", "Bearer " + userBToken)
                         .contentType(MediaType.APPLICATION_JSON)
